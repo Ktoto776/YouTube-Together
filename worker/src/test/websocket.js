@@ -12,6 +12,13 @@ ws.on('open', () => {
         name:"tester",
     }));
 });
+// >UserJoined - пользователь зашел
+// >UserdataChanged - пользователь изменил данные
+// >UserLeft - Пользователь вышел
+// >AuthEnded - Успешный вход
+// >UnvaliableKey - +newData с новым ключём(Auth, не нужно заного посылать)
+
+// <Auth - Смена данных/При входе
 
 ws.on('message', (data) => {
     console.log('Received:', data.toString());

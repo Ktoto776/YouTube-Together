@@ -1,2 +1,5 @@
 /worker/.vscode/
 /userscript/node_modules/
+/worker/worker-configuration.d.ts
+.wrangler/
+publish.bat

@@ -1,5 +1,55 @@
 import { DurableObject } from "cloudflare:workers";
 
+const idSplitter = 100;
+function getUserID_KV_Name(id:number){
+	return "UserID.part-"+Math.ceil(id/idSplitter)
+}
+async function getUserIDKeys(name:number|string,env:Env){
+	if (typeof name ==="number"){
+		name = getUserID_KV_Name(name)
+	}; const tab = await env.KV.get(name);
+	if (tab){
+		try{
+			return JSON.parse(tab)
+		}catch{
+			return []
+		}
+	}else{
+		return []
+	}
+}
+function getSplitIdOffset(id:number){
+	return (id-1) %idSplitter
+}
+async function getUserKeyById(id:number,env:Env){
+	return (await getUserIDKeys(id,env))[getSplitIdOffset(id)]
+}
+
+async function setUserKeyById(id:number,key:string,env:Env){
+	const k = getUserID_KV_Name(id)
+	const tab = (await getUserIDKeys(k,env))
+	tab[getSplitIdOffset(id)] = key
+	await env.KV.put(k, key);
+}
+
+async function sha256(key:string) {
+	const msgBuffer = new TextEncoder().encode(key);
+	const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+	const hashArray = Array.from(new Uint8Array(hashBuffer));
+	const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+	return hashHex;
+}
+async function generateNewUserID(IP:string,env:Env) {
+	const value = Number(await env.KV.get('lastUserID')) || 0;
+	const thisID = value+1;
+	await env.KV.put('lastUserID', String(thisID));
+	const key = (await sha256(IP+String(Date.now()))).slice(0,16);
+	await setUserKeyById(thisID,key,env)
+	return {
+		id:thisID,
+		key:key
+	}
+}
 /**
  * Welcome to Cloudflare Workers! This is your first Durable Objects application.
  *
@@ -94,7 +144,7 @@ export class MyDurableObject extends DurableObject<Env> {
 					if (typeof tMessage.name!=='string'){
 						return ws.close(1003,"username is not string")
 					}
-					const id = Number(tMessage.id)
+					let id = Number(tMessage.id)
 					if (Number.isNaN(id)){
 						return ws.close(1003,"userID is not number")
 					}
@@ -102,7 +152,19 @@ export class MyDurableObject extends DurableObject<Env> {
 						if (this.userIDs.includes(id)){
 							return ws.close(1003,"userID is already exists")
 						}else{
-							// TODO: Сделай проверку на аккаунты
+							const key = (await getUserKeyById(id,this.env));
+							if (typeof key==="string"){
+								if (key!==tMessage.key){
+									return ws.close(1003,"key error")
+								}
+							}else{
+								const newData = (await generateNewUserID(data.IPHash,this.env))
+								id = newData.id,
+								ws.send(JSON.stringify({
+									type:"UnvaliableKey",
+									newData:newData
+								}))
+							}
 						}; this.userIDs.push(id);
 						await this.saveIDs();
 						const allSockets = this.ctx.getWebSockets();
@@ -110,7 +172,7 @@ export class MyDurableObject extends DurableObject<Env> {
 							const data = sock.deserializeAttachment();
 							if (data.isAuthenticated){
 								ws.send(JSON.stringify({
-									type:"Auth",
+									type:"UserJoined",
 									id:data.id,
 									name:data.name,
 								}))
@@ -120,19 +182,26 @@ export class MyDurableObject extends DurableObject<Env> {
 							type:"AuthEnded",
 							ownerId:this.getOwnerID(),
 						}))
+						this.sendOnAllSockets(ws,JSON.stringify({
+							type:"UserJoined",
+							id:id,
+							name:tMessage.name
+						}))
 					}else if (data.id!=id){
 						return ws.close(1003,"userid is not the same")
+					}else{
+						this.sendOnAllSockets(ws,JSON.stringify({
+							type:"UserdataChanged",
+							id:id,
+							name:tMessage.name
+						}))
 					}
 					ws.serializeAttachment({
 						isAuthenticated:true,
+						IPHash:data.IPHash,
 						id:id,
 						name:tMessage.name
 					})
-					this.sendOnAllSockets(ws,JSON.stringify({
-						type:"Auth",
-						id:id,
-						name:tMessage.name
-					}))
 				}else if (data.isAuthenticated){
 					tMessage.id = data.id
 					tMessage.name = data.name
@@ -150,7 +219,9 @@ export class MyDurableObject extends DurableObject<Env> {
 	async fetch(request:Request){
 		const [client, server] = Object.values(new WebSocketPair());
 		this.ctx.acceptWebSocket(server);
-		server.serializeAttachment({isAuthenticated:false});
+		server.serializeAttachment({isAuthenticated:false,
+			IPHash: sha256(request.headers.get("CF-Connecting-IP") || "....")
+		});
 		await this.refreshIDs();
 		return new Response(null, {
 			status: 101,
@@ -169,7 +240,9 @@ export default {
 		const url = new URL(request.url);
 		const path = url.pathname.replace(/^\/+|\/+$/g, '')
 		if (!upgradeHeader || upgradeHeader !== 'websocket') {
-			if (path=="get-new-userid"){
+			if (path=="get-new-userdata"){
+				const clientIP = request.headers.get("CF-Connecting-IP") || "....";
+				return new Response(JSON.stringify(await generateNewUserID(clientIP,env)), { status: 200 });
 				// TODO: Сделай систему аккаунтов
 			}
 			return new Response('Expected Upgrade: websocket', { status: 426 });
