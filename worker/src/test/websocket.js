@@ -2,7 +2,9 @@ const WebSocket = require('ws');
 
 const roomname = "idk"
 const ws = new WebSocket('ws://localhost:8787/'+roomname)
-const id = Math.floor(Math.random()*1000)
+const id = 24;
+const key = "5b679075b3777c9e";
+const thisWSVerion = "1";
 
 ws.on('open', () => {
     console.log('Connected');
@@ -10,6 +12,7 @@ ws.on('open', () => {
         type:"Auth",
         id:id,
         name:"tester",
+        version:thisWSVerion,
     }));
 });
 // >UserJoined - пользователь зашел

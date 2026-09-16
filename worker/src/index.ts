@@ -1,8 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
 
+const thisWSVerion = "1";
+
 const idSplitter = 100;
 function getUserID_KV_Name(id:number){
-	return "UserID.part-"+Math.ceil(id/idSplitter)
+	return "UserIDs.part-"+Math.ceil(id/idSplitter)
 }
 async function getUserIDKeys(name:number|string,env:Env){
 	if (typeof name ==="number"){
@@ -29,7 +31,7 @@ async function setUserKeyById(id:number,key:string,env:Env){
 	const k = getUserID_KV_Name(id)
 	const tab = (await getUserIDKeys(k,env))
 	tab[getSplitIdOffset(id)] = key
-	await env.KV.put(k, key);
+	await env.KV.put(k, JSON.stringify(tab));
 }
 
 async function sha256(key:string) {
@@ -43,7 +45,7 @@ async function generateNewUserID(IP:string,env:Env) {
 	const value = Number(await env.KV.get('lastUserID')) || 0;
 	const thisID = value+1;
 	await env.KV.put('lastUserID', String(thisID));
-	const key = (await sha256(IP+String(Date.now()))).slice(0,16);
+	const key = (await sha256(IP+String(Math.random())+String(Date.now()))).slice(0,16);
 	await setUserKeyById(thisID,key,env)
 	return {
 		id:thisID,
@@ -149,6 +151,9 @@ export class MyDurableObject extends DurableObject<Env> {
 						return ws.close(1003,"userID is not number")
 					}
 					if (!data.isAuthenticated){
+						if (data.version !== thisWSVerion){
+							return ws.close(1003,"Unsupported version")
+						}
 						if (this.userIDs.includes(id)){
 							return ws.close(1003,"userID is already exists")
 						}else{
@@ -218,11 +223,11 @@ export class MyDurableObject extends DurableObject<Env> {
 	}
 	async fetch(request:Request){
 		const [client, server] = Object.values(new WebSocketPair());
-		this.ctx.acceptWebSocket(server);
 		server.serializeAttachment({isAuthenticated:false,
-			IPHash: sha256(request.headers.get("CF-Connecting-IP") || "....")
+			IPHash: await sha256(request.headers.get("CF-Connecting-IP") || "....")
 		});
 		await this.refreshIDs();
+		this.ctx.acceptWebSocket(server);
 		return new Response(null, {
 			status: 101,
 			webSocket: client,
@@ -256,6 +261,6 @@ export default {
 			return new Response('Room is not defined', { status: 400 });
 		}
 		const stub = env.DURABLE_OBJECT.getByName(room);
-		return stub.fetch(request);
+		return await stub.fetch(request);
 	},
 } satisfies ExportedHandler<Env>;
