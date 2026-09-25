@@ -33,7 +33,10 @@
         TextboxHeight: "16px",
         ButtonFontSize: "24px",
         ErrorDescriptionFontSize: "16px",
-        RoomNameFontSize: "13px"
+        RoomNameFontSize: "13px",
+        UsernameFontSize: "20px",
+        ViewerHeight: "26px",
+        ViewersWidth: "250px",
     }
     const isDarkTheme = document.documentElement.hasAttribute('dark');
     const colors = {
@@ -47,6 +50,7 @@
         textBoxInWindowColor: (isDarkTheme && "#0f0f0f") || "#eaeaea",
         textColorTBInWindowColor: (isDarkTheme && "#f1f1f1") || "#0f0f0f",
         textBoundTBInWindowColor: (isDarkTheme && "#3f3f3f") || "#e5e5e5",
+        windowSeparator: (isDarkTheme && '#bbbbbb') || "#4f4f4f",
         secondButton:{
             background: (isDarkTheme && '#2f2f2f') || "#f2f2f2",
             content: (isDarkTheme && '#f3f3f3') || "#000000",
@@ -60,6 +64,10 @@
             connected: "green",
             connecting: "yellow",
             error: "red"
+        },
+        viewers:{
+            hoverBackground: (isDarkTheme && '#343434') || "#e2e2e2",
+            buttonBackground: (isDarkTheme && '#505050') || "#b8b8b8",
         }
     }
     const isRussianLang = document.documentElement.lang.startsWith("ru");
@@ -79,6 +87,7 @@
             "Someone is definitely waiting for you somewhere—you just have to figure out where!!\n(And write it in the room name)",
         Connected: (isRussianLang && "Подключено") || "Connected",
         ConnectedToRoom: (isRussianLang && "к комнате ") || "to room ",
+        UnsupportedVersion: (isRussianLang && "Не поддерживаемая версия, обнови скрипт") || "Unsupported version; update the script.",
     }
     /** @type {HTMLVideoElement} */
     let video = null;
@@ -87,6 +96,10 @@
     /** @type {{id:number,key:string}|null} */
     let userData = JSON.parse(GM_getValue(userDataSaveName,'null'));
     let username = GM_getValue("username",'');
+    function getServerUsername(){
+        if (username==="")return UserNoName;
+        else return username;
+    }
     /** @param {string|object} nuserdata */
     function newUserdata(nuserdata){
         let str
@@ -206,6 +219,10 @@
     header.append(closeButton)
     frame.append(header)
     const frameDiv = document.createElement("div")
+    Object.assign(frameDiv.style,{
+        display: "flex",
+        flexDirection: 'row',
+    })
     const funcFrame = document.createElement("overflow")
     Object.assign(funcFrame.style,{
         maxHeight: "90dvh", //90%
@@ -346,6 +363,208 @@
     connectedDiv.append(roomNameTitle);
     funcFrame.append(connectedDiv);
     frameDiv.append(funcFrame)
+    // Viewer list
+    const viewersListDiv = document.createElement("div")
+    Object.assign(viewersListDiv.style,{
+        display: "flex",
+        flexDirection: 'row',
+    })
+    const viewersListSeparator = document.createElement("div")
+    Object.assign(viewersListSeparator.style,{
+        alignSelf: "stretch",
+        width: "2px",
+        background: colors.windowSeparator,
+        margin: "0 10px",
+        borderRadius: "3px"
+    })
+    viewersListDiv.append(viewersListSeparator);
+    const viewersList = document.createElement("overflow")
+    Object.assign(viewersList.style,{
+        display: "flex",
+        flexDirection: 'column',
+        maxHeight: "90dvh", //90%
+        overflowY: "auto",
+        width: sizes.ViewersWidth
+    })
+    function createCrownIcon(color = 'currentColor') {
+        const svgNS = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(svgNS, 'svg');
+        svg.setAttribute('xmlns', svgNS);
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('fill', color);
+        svg.setAttribute('stroke', 'none');
+        const path = document.createElementNS(svgNS, 'path');
+        path.setAttribute('d', 'M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z');
+        svg.append(path);
+        return svg;
+    }
+    function createViewerDiv(){
+        const viewerDiv = document.createElement("div")
+        Object.assign(viewerDiv.style,{
+            display: "flex",
+            alignItems: "center",
+            flexDirection: 'row',
+            width: "100%",
+            marginBottom: "10px",
+            height: sizes.ViewerHeight
+        });
+        const isAdminDiv = document.createElement("div");
+        Object.assign(isAdminDiv.style,{
+            height:"90%",
+            aspectRatio: '1',
+        })
+        const isAdminIcon = createCrownIcon();
+        Object.assign(isAdminIcon.style,{
+            height:"100%",
+            width: '100%',
+        })
+        isAdminDiv.append(isAdminIcon);
+        viewerDiv.append(isAdminDiv);
+        const VName = document.createElement("span")
+        Object.assign(VName.style,{
+            fontSize:sizes.UsernameFontSize,
+            flex: "1"
+        })
+        VName.textContent = "PLACEHOLDER"
+        viewerDiv.addEventListener("mouseenter",()=>{
+            viewerDiv.style.background = colors.viewers.hoverBackground
+        });
+        viewerDiv.addEventListener("mouseleave",()=>{
+            viewerDiv.style.background = ""
+        });
+        viewerDiv.append(VName)
+        viewersList.append(viewerDiv)
+        return {
+            Div:viewerDiv,
+            isAdminIcon:isAdminIcon,
+            isAdminDiv:isAdminDiv,
+            Name:VName
+        }
+    }
+    /** @type {ElementCSSInlineStyle.style} */
+    const ViewerButtonStyle = {
+        margin: "0px 5px",
+        height: "95%",
+        background: colors.viewers.buttonBackground,
+        aspectRatio: '1',
+        borderRadius: "50%",
+        padding: '0',
+        color: colors.mainButtonTextColor,
+        // center
+        display: "flex",
+        alignItems: "center",
+        justifyContent: 'center',
+    }
+    /**
+     * @typedef {Object} VData
+     * @property {number} id
+     * @property {HTMLSpanElement} Name
+     * @property {HTMLDivElement} Div
+     * @property {HTMLDivElement} AdminDiv
+     * @property {HTMLDivElement} isAdminDiv
+     * @property {SVGSVGElement} isAdminIcon
+     * @property {()=> void} remove
+     * @property {()=> void} refreshAdminIcon
+     */
+    /** @type {{[id:Number]:VData}} */
+    const Viewers = {};
+    /** 
+     * @param {Number} Id
+     * @returns {VData} 
+     */
+    let isImOwner = false;
+    let ownerID = 0;
+    /** @type {(data:string)=>void} */
+    let sendData = ()=>{};
+    function createViewer(Id){
+        const data = createViewerDiv();
+        const adminDiv = document.createElement("div");
+        Object.assign(adminDiv.style,{
+            height: "100%",
+            padding: "0"
+        })
+        const kickButton = document.createElement("button");
+        Object.assign(kickButton.style,ViewerButtonStyle);
+        kickButton.style.lineHeight = '1';
+        kickButton.textContent = '×';
+        adminDiv.append(kickButton)
+        data.Div.append(adminDiv)
+        kickButton.style.fontSize = kickButton.clientHeight+"px";
+        adminDiv.hidden = !isImOwner;
+        const vdata = {
+            id:Id,
+            Name:data.Name,
+            Div:data.Div,
+            AdminDiv:adminDiv,
+            isAdminIcon:data.isAdminIcon,
+            isAdminDiv:data.isAdminDiv,
+            remove:()=>{
+                data.Div.remove();
+                Viewers[Id] = undefined;
+            }, refreshAdminIcon:()=>{
+                if (ownerID===Id){
+                    data.isAdminIcon.removeAttribute("hidden")
+                }else{
+                    data.isAdminIcon.setAttribute("hidden",true)
+                }
+            }
+        }; vdata.refreshAdminIcon();
+        kickButton.addEventListener("click",()=>{
+            adminDiv.hidden = true;
+            vdata.remove();
+            sendData(JSON.stringify({
+                type:"kick",
+                targetID:Id,
+            }))
+        });
+        Viewers[Id] = vdata
+        return vdata
+    }
+    function createExitIcon(color ="currentColor") {
+        const svgNS = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(svgNS, 'svg');
+        svg.setAttribute('xmlns', svgNS);
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('fill', 'none');
+        svg.setAttribute('stroke-width', '2');
+        svg.setAttribute('stroke-linecap', 'round');
+        svg.setAttribute('stroke-linejoin', 'round');
+        svg.setAttribute('stroke', color);
+        const doorPath = document.createElementNS(svgNS, 'path');
+        doorPath.setAttribute('d', 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4');
+        svg.append(doorPath);
+        const arrowHead = document.createElementNS(svgNS, 'polyline');
+        arrowHead.setAttribute('points', '16 17 21 12 16 7');
+        svg.append(arrowHead);
+        const arrowLine = document.createElementNS(svgNS, 'line');
+        arrowLine.setAttribute('x1', '21');
+        arrowLine.setAttribute('y1', '12');
+        arrowLine.setAttribute('x2', '9');
+        arrowLine.setAttribute('y2', '12');
+        svg.append(arrowLine);
+        return svg;
+    }
+    const you = createViewerDiv()
+    you.Name.textContent = getServerUsername();
+    function refreshYourAdminIcon(){
+        if (isImOwner){
+            you.isAdminIcon.removeAttribute("hidden")
+        }else{
+            you.isAdminIcon.setAttribute("hidden",true)
+        }
+    }
+    refreshYourAdminIcon()
+    const leaveButton = document.createElement("button");
+    Object.assign(leaveButton.style,ViewerButtonStyle);
+    const leaveSVG = createExitIcon()
+    Object.assign(leaveSVG.style,{
+        height: "90%",
+        width: "90%"
+    });
+    leaveButton.append(leaveSVG);
+    you.Div.append(leaveButton);
+    viewersListDiv.append(viewersList)
+    frameDiv.append(viewersListDiv)
     frame.append(frameDiv)
     theWindow.append(frame)
     // LISTINERS
@@ -432,6 +651,7 @@
         isWorking.hidden = true;
         connectingHeader.hidden = true;
         connectedDiv.hidden = true;
+        viewersListDiv.hidden = true;
     }; hideAll();
     connectingHeader.hidden = false;
     let userdataWaited = false;
@@ -462,30 +682,83 @@
     let isConnecting = false;
     /** @type {WebSocket | null} */
     let socket = null;
+    sendData = (data)=>{
+        socket?.send(data);
+    };
+    // URLS
+    /** @type {string | null} */
+    let videoID = null;
+    function refreshVideoID(){
+        const URLParams = new URLSearchParams(location.search);
+        videoID = URLParams.get('v');
+    }
+    const originalPush = history.pushState;
+    const originalReplace = history.replaceState;
+    function runURLChangeEvent(){
+        const lastVID = videoID;
+        refreshVideoID();
+        if (lastVID !== videoID){
+            window.dispatchEvent(new Event('urlchange'));
+        }
+    }
+    history.pushState = function (...args) {
+        const result = originalPush.apply(this, args);
+        runURLChangeEvent()
+        return result;
+    }; history.replaceState = function (...args) {
+        const result = originalReplace.apply(this, args);
+        runURLChangeEvent()
+        return result;
+    };
+    window.addEventListener("popstate",runURLChangeEvent);
+    window.addEventListener("yt-navigate-finish",runURLChangeEvent);
+    let changeVideoIDto = ""
+    let videoTime = [0,Date.now()]
+    window.addEventListener("urlchange",()=>{
+        print("Video has been changed:",videoID);
+        if (isConnected){
+            if (changeVideoIDto===""){
+                socket.send(JSON.stringify({
+                    type:"ChangeVideo",
+                    video:videoID,
+                }))
+            }else if(changeVideoIDto==videoID){
+                video.currentTime = videoTime[0]+(Date.now()-videoTime[1])/1000
+            }
+        }
+    }); refreshVideoID();
+    //SOCKET
     function getAuthData(){
         return {
             type:"Auth",
             id:userData.id,
             key:userData.key,
-            name:username,
+            name:getServerUsername(),
             version:thisWSVerion
         }
     }
     NameInput.addEventListener("change",(event)=>{
         username = event.target.value;
+        you.Name.textContent = getServerUsername();
         GM_setValue("username",username)
         if (isConnected){
             socket.send(JSON.stringify(getAuthData()));
         }
     })
-    // Room vars
-    let isImOwner = false;
-    let ownerID = 0;
     // ROOM FUNCTIONS
     function newOwnerUserID(newOwnerID){
-        isImOwner = newOwnerID===userData.id;
-        ownerID = newOwnerID
-        // TODO: надпись у овнера
+        if (ownerID!==newOwnerID){
+            ownerID = newOwnerID
+            isImOwner = newOwnerID===userData.id;
+            refreshYourAdminIcon();
+            for (const v of Object.values(Viewers)){
+                if (typeof v==="object"&&v!==null){
+                    v.AdminDiv.hidden = !isImOwner;
+                    v.refreshAdminIcon()
+                }
+            }
+        }
+        // TODO: корона у овнера
     }
     // SOCKET FUNCTIONS
     /** @type {string} */
@@ -499,14 +772,17 @@
     }
     function atConnectMenu(){
         if (socket!==null){
-            socket.close(1000)
-        }else{
-            isConnected = false;
-            isConnecting = false;
-            hideAll();
-            connectDiv.hidden = false;
+            socket.close(1000);
+            socket = null;
         }
+        isConnected = false;
+        isConnecting = false;
+        hideAll();
+        connectDiv.hidden = false;
     }
+    leaveButton.addEventListener("click",()=>{
+        atConnectMenu();
+    });
     /** @param {string} key */
     function connect(key){
         hideAll();
@@ -523,6 +799,10 @@
             print("[[CONNECT]]ing TO: ",key)
             connectingHeader.hidden = false;
         }
+        for (const v of Object.values(Viewers)){
+            v?.remove();
+        }
+        newOwnerUserID(0);
         socket = new WebSocket("ws"+Domain+key);
         isConnecting = true;
         isConnected = false;
@@ -533,6 +813,10 @@
             socket.send(JSON.stringify(getAuthData()))
         })
         socket.addEventListener("message",(event)=>{
+            if (socket!==event.target){
+                print("Message event when socket closed in room "+key+":",event.data);
+                return
+            }
             const data = JSON.parse(event.data);
             if (data.type==="AuthEnded"){
                 isConnecting = false;
@@ -542,19 +826,33 @@
                 isWorking.style.background = colors.indicator.connected;
                 connectedDiv.hidden = false;
                 roomNameTitle.textContent = texts.ConnectedToRoom+key;
+                viewersListDiv.hidden = false;
                 newOwnerUserID(data.ownerId)
             }else if(data.type==="UnvaliableKey"){
                 newUserdata(data.newData);
             }else if(data.type==="UserLeft"){
                 if (data.newOwner!==ownerID){
                     newOwnerUserID(data.newOwner)
-                } // TODO: Выход пользователя
+                } const user = Viewers[data.id];
+                if (user!==undefined){
+                    user.remove();
+                }
             }else if(data.type=="UserJoined"){
-                // TODO: Сделать вход пользователя
+                const user = createViewer(data.id);
+                user.Name.textContent = data.name
+            }else if(data.type=="UserdataChanged"){
+                const user = Viewers[data.id];
+                if (user!==undefined){
+                    user.Name.textContent = data.name
+                }
             }
         })
         socket.addEventListener("close",(event)=>{
-            isConnecting = false;
+            if (socket!==event.target){
+                if (event.code!=1000){
+                    print("Unknown code ["+event.code+"] on closed socket in room "+key+":",event.reason);
+                }; return
+            }; isConnecting = false;
             isConnected = false;
             socket = null;
             if (event.code==1000){
@@ -564,7 +862,11 @@
                 isWorking.hidden = false;
                 isWorking.style.background = colors.indicator.error;
                 errorDiv.hidden = false;
-                errorDescription.textContent = event.reason+" ("+event.code+")"
+                let err = event.reason+" ("+event.code+")";
+                if (event.code===1003&&"Unsupported version"===event.reason){
+                    err = texts.UnsupportedVersion
+                }
+                errorDescription.textContent = err
                 errBackButton.hidden = false;
                 errRetryButton.hidden = false;
                 errRetryButton.onclick = ()=>{

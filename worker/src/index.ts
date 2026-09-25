@@ -126,13 +126,19 @@ export class MyDurableObject extends DurableObject<Env> {
 			this.userIDs = this.userIDs.filter(x => x !== id);
 			await this.saveIDs();
 			const newOwner = this.getOwnerID()
+			const kickData = data.kickData;
 			this.sendOnAllSockets(ws,JSON.stringify({
 				type:"UserLeft",
 				id:id,
 				name:data.name,
 				newOwner:newOwner,
+				isKicked:typeof kickData==="object",
+				kickData:kickData,
 			}))
 		}
+		try{
+			ws.close(code,reason)
+		}catch{}
 	}
 	async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
 		const data = ws.deserializeAttachment();
@@ -151,7 +157,7 @@ export class MyDurableObject extends DurableObject<Env> {
 						return ws.close(1003,"userID is not number")
 					}
 					if (!data.isAuthenticated){
-						if (data.version !== thisWSVerion){
+						if (tMessage.version !== thisWSVerion){
 							return ws.close(1003,"Unsupported version")
 						}
 						if (this.userIDs.includes(id)){
@@ -208,9 +214,35 @@ export class MyDurableObject extends DurableObject<Env> {
 						name:tMessage.name
 					})
 				}else if (data.isAuthenticated){
-					tMessage.id = data.id
-					tMessage.name = data.name
-					this.sendOnAllSockets(ws,JSON.stringify(tMessage))
+					if (tMessage.type==="kick"){
+						if (this.getOwnerID()!==data.id) return;
+						const allSockets = this.ctx.getWebSockets();
+						const target = tMessage.targetID;
+						const reason = tMessage.reason ?? "undefined";
+						for (const ws of allSockets) {
+							const wData = ws.deserializeAttachment();
+							if (wData.isAuthenticated){
+								if (wData.id===target){
+									wData.kickData = {
+										reason:reason,
+										adminID:data.id
+									}
+									ws.serializeAttachment(wData);
+									ws.close(4007,data.name+" kicked you, reason: "+reason)
+								}
+							}
+						}
+					}else{
+						if (data.type=="UserdataChanged"||data.type=="UserJoined"||
+							data.type=="UserLeft"||data.type=="AuthEnded"||data.type=="UnvaliableKey"
+						){
+							ws.close(1003,"type is not supported")
+							return
+						}
+						tMessage.id = data.id
+						tMessage.name = data.name
+						this.sendOnAllSockets(ws,JSON.stringify(tMessage))
+					}
 				}else{
 					console.log("No authenticated try to send message")
 				}
